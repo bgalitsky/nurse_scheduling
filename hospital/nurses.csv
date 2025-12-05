@@ -1,0 +1,21 @@
+nurse_id,full_name,degree,certification,max_daily_hours,qualifications
+N01,Alice Smith,BSN,CEN,6,RN;ER;Procedural
+N02,Bob Johnson,MSN,CCRN,6,RN;ICU;Charge
+N03,Carol Lee,BSN,CNOR,6,RN;OR;Procedural
+N04,David Kim,BSN,OCN,6,RN;ICU;Oncology
+N05,Eva Brown,BSN,RNC-Peds,6,RN;Pediatrics;Maternity
+N06,Frank Wilson,ADN,CDN,6,RN;Dialysis;Charge
+N07,Grace Miller,ADN,,6,RN;MedSurg
+N08,Hank Davis,BSN,CEN,6,RN;ER;ICU
+N09,Ivy Garcia,BSN,OCN,6,RN;Oncology;Procedural
+N10,Jack Martinez,BSN,CNOR,6,RN;OR;Charge
+N11,Karen Robinson,BSN,RNC-OB,6,RN;Maternity;MedSurg
+N12,Leo Clark,BSN,CDN,6,RN;Dialysis;ICU
+N13,Mia Rodriguez,BSN,CPN,6,RN;Pediatrics;ER
+N14,Noah Lewis,ADN,,6,RN;MedSurg;Oncology
+N15,Olivia Walker,BSN,CNOR,6,RN;OR;Procedural
+N16,Paul Hall,MSN,CCRN,6,RN;ICU;ER
+N17,Quinn Allen,BSN,CPN,6,RN;Pediatrics;MedSurg
+N18,Ruby Young,BSN,RNC-OB,6,RN;Maternity;Procedural
+N19,Sam Hernandez,BSN,OCN,6,RN;Dialysis;Oncology
+N20,Tina King,BSN,CEN,6,RN;ER;MedSurg
