@@ -1,0 +1,13 @@
+room_id,room_name,required_qualifications,tags
+R1,Emergency,RN;ER,ER
+R2,ICU,RN;ICU,ICU
+R3,Operating Room 1,RN;OR,OR
+R4,Operating Room 2,RN;OR,OR
+R5,Pediatrics,RN;Pediatrics,PEDS
+R6,Oncology,RN;Oncology,ONC
+R7,Maternity,RN;Maternity,OB
+R8,Dialysis,RN;Dialysis,DIAL
+R9,Procedural Suite,RN;Procedural,PROC
+R10,Med-Surg,RN;MedSurg,MEDSURG
+R11,Stepdown Unit,RN;ICU,STEPDOWN
+R12,PACU,RN;Procedural,PACU
