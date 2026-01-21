@@ -1,6 +1,6 @@
 import pandas as pd
 import streamlit as st
-
+# ssh -i C:\Users\User\.ssh\aws_ec2_key.pem ec2-user@54.82.56.2
 from or_tools_scheduler import solve_schedule_ortools, Weights
 
 DATA_DIR = "data"
