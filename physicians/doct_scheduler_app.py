@@ -50,7 +50,7 @@ class Vacation:
 
 
 # ----------------------------
-# Parsing helpers
+# Parsing helpersuse_container_width
 # ----------------------------
 
 def parse_date(s: str, year: int, month: int) -> dt.date:
@@ -577,9 +577,9 @@ with st.sidebar:
     prio_text = st.text_area("Приоритеты (name,cab1|cab2)", value=default_priorities, height=240)
     vac_text = st.text_area("Отпуска (name,start,end)", value=default_vac, height=160)
     cabins_text = st.text_area("Кабинеты", value=default_cabins, height=70)
-    holidays_text = st.text_area("Праздники/доп. выходные (опц.)", value=default_holidays, height=60)
+    holidays_text = st.text_area("Праздники/доп. выходные (опц.) dd.mm.yyyy", value=default_holidays, height=60)
 
-    recompute_clicked = st.button("Recompute", type="primary", use_container_width=True)
+    recompute_clicked = st.button("Recompute", type="primary", width='stretch')
 
 if "computed" not in st.session_state:
     st.session_state.computed = False
@@ -653,7 +653,7 @@ if st.session_state.computed:
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, height=520)
+    st.dataframe(df, width='stretch', height=520)
 
     st.subheader("Сводка по врачам")
     summ_rows = []
@@ -667,7 +667,7 @@ if st.session_state.computed:
             "Отклонение": fact - required[doc.name],
             "Приоритеты": ", ".join(doc.priorities),
         })
-    st.dataframe(pd.DataFrame(summ_rows), use_container_width=True, height=320)
+    st.dataframe(pd.DataFrame(summ_rows), width='stretch', height=320)
 
     xlsx_bytes = export_xlsx_bytes(
         doctors=doctors,
@@ -683,7 +683,7 @@ if st.session_state.computed:
         data=xlsx_bytes,
         file_name=filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+        width='stretch',
     )
 
     with st.expander("Загрузка кабинетов (детально)"):
@@ -698,4 +698,4 @@ if st.session_state.computed:
                     "Кабинет": cab,
                     "Врач": who,
                 })
-        st.dataframe(pd.DataFrame(load_rows), use_container_width=True, height=420)
+        st.dataframe(pd.DataFrame(load_rows), width='stretch', height=420)
