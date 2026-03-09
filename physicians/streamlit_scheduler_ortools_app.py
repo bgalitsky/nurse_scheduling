@@ -99,7 +99,13 @@ def parse_doctors(text):
     for l in text.splitlines():
         if not l.strip(): continue
         p = [x.strip() for x in l.split(",")]
-        out.append(Doctor(p[0], float(p[1]), p[2].split("|") if len(p) > 2 and p[2] else []))
+        full_part = 1
+        try:
+            full_part = float(p[1])
+        except ValueError:
+            full_part = int(p[1])/1.0
+
+        out.append(Doctor(p[0], full_part, p[2].split("|") if len(p) > 2 and p[2] else []))
     return out
 
 def parse_vacations(text, year):
