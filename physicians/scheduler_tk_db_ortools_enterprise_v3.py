@@ -612,10 +612,10 @@ def solve_with_cpsat(
             else:
                 model.Add(w == 0)
 
-    # Max 5 consecutive workdays
+    # Max 6 consecutive working days
     for dj in range(len(doc_names)):
-        for start in range(0, len(days) - 6 + 1):
-            model.Add(sum(work[(di, dj)] for di in range(start, start + 6)) <= 5)
+        for start in range(0, len(days) - 7 + 1):
+            model.Add(sum(work[(di, dj)] for di in range(start, start + 7)) <= 6)
 
     # Norms / extra shifts
     for dj, name in enumerate(doc_names):
@@ -626,13 +626,16 @@ def solve_with_cpsat(
         else:
             model.Add(total_work == norm[name])
 
-    # By default vary morning/evening unless preference:
-    # if physician has no explicit preference and has >=2 weekday shifts, require at least one morning and one evening.
+    # By default alternate morning/evening unless explicit preference.
+    # For physicians without a preference:
+    #   1) if they work >=2 weekday shifts in the month, they must have at least one morning and one evening
+    #   2) if they work on two consecutive weekdays, the shift must alternate (у->в or в->у)
     if enforce_morning_evening_mix:
         shift_pref = shift_pref or {}
         for dj, name in enumerate(doc_names):
-            #if shift_pref.get(name) in ('у', 'в'):
-            #    continue
+            if shift_pref.get(name) in ('у', 'в'):
+                continue
+
             m_vars, e_vars = [], []
             for di, day in enumerate(days):
                 if is_weekend(day) or day in holidays:
@@ -644,16 +647,42 @@ def solve_with_cpsat(
                         m_vars.append(x[(si_m, dj)])
                     if (si_e, dj) in x:
                         e_vars.append(x[(si_e, dj)])
-            if not m_vars and not e_vars:
-                continue
-            m_cnt = sum(m_vars) if m_vars else 0
-            e_cnt = sum(e_vars) if e_vars else 0
-            tot = m_cnt + e_cnt
-            has_two = model.NewBoolVar(f"has_two_{dj}")
-            model.Add(tot >= 2).OnlyEnforceIf(has_two)
-            model.Add(tot <= 1).OnlyEnforceIf(has_two.Not())
-            model.Add(m_cnt >= 1).OnlyEnforceIf(has_two)
-            model.Add(e_cnt >= 1).OnlyEnforceIf(has_two)
+
+            if m_vars or e_vars:
+                m_cnt = sum(m_vars) if m_vars else 0
+                e_cnt = sum(e_vars) if e_vars else 0
+                tot = m_cnt + e_cnt
+                has_two = model.NewBoolVar(f"has_two_{dj}")
+                model.Add(tot >= 2).OnlyEnforceIf(has_two)
+                model.Add(tot <= 1).OnlyEnforceIf(has_two.Not())
+                model.Add(m_cnt >= 1).OnlyEnforceIf(has_two)
+                model.Add(e_cnt >= 1).OnlyEnforceIf(has_two)
+
+            # Pairwise alternation over consecutive weekdays
+            for di in range(len(days) - 1):
+                d1, d2 = days[di], days[di + 1]
+                if is_weekend(d1) or d1 in holidays or is_weekend(d2) or d2 in holidays:
+                    continue
+
+                m1, e1, m2, e2 = [], [], [], []
+                for cab in cabins:
+                    si_m1 = slot_idx[(di, 'у', cab)]
+                    si_e1 = slot_idx[(di, 'в', cab)]
+                    si_m2 = slot_idx[(di + 1, 'у', cab)]
+                    si_e2 = slot_idx[(di + 1, 'в', cab)]
+                    if (si_m1, dj) in x:
+                        m1.append(x[(si_m1, dj)])
+                    if (si_e1, dj) in x:
+                        e1.append(x[(si_e1, dj)])
+                    if (si_m2, dj) in x:
+                        m2.append(x[(si_m2, dj)])
+                    if (si_e2, dj) in x:
+                        e2.append(x[(si_e2, dj)])
+
+                if m1 and m2:
+                    model.Add(sum(m1) + sum(m2) <= 1)  # no morning-morning on consecutive weekdays
+                if e1 and e2:
+                    model.Add(sum(e1) + sum(e2) <= 1)  # no evening-evening on consecutive weekdays
 
     # Objective: fill slots, reward priorities, reward preferred shift
     obj_terms = []
@@ -895,8 +924,9 @@ class SchedulerTkApp:
         ttk.Spinbox(top, from_=0, to=10, textvariable=self.var_pref_weight, width=5).grid(row=0, column=9, padx=4)
         ttk.Checkbutton(top, text="Варьировать утро/вечер по умолчанию", variable=self.var_enforce_mix).grid(row=0, column=10, padx=8)
         ttk.Button(top, text="Recompute", command=self.on_recompute).grid(row=0, column=11, padx=8)
-        ttk.Button(top, text="Export XLSX", command=self.on_export).grid(row=0, column=12, padx=4)
-        ttk.Button(top, text="Import wish_list.xlsx → DB", command=self.on_import_wishlist_to_db).grid(row=0, column=13, padx=4)
+        ttk.Button(top, text="Apply schedule edits", command=self.on_apply_schedule_edits).grid(row=0, column=12, padx=4)
+        ttk.Button(top, text="Export XLSX", command=self.on_export).grid(row=0, column=13, padx=4)
+        ttk.Button(top, text="Import wish_list.xlsx → DB", command=self.on_import_wishlist_to_db).grid(row=0, column=14, padx=4)
 
         nb = ttk.Notebook(main)
         nb.grid(row=1, column=0, sticky="nsew")
@@ -1144,6 +1174,13 @@ class SchedulerTkApp:
                                         "copy", "edit_cell"))
             self.sheet.grid(row=0, column=0, sticky="nsew")
             self.grid_widget = "tksheet"
+            # Best-effort auto-refresh after edits. If a given binding is unsupported by the installed
+            # tksheet version, the explicit "Apply schedule edits" button still works.
+            for seq in ("<FocusOut>", "<Return>", "<KP_Enter>", "<ButtonRelease-1>"):
+                try:
+                    self.sheet.bind(seq, self._schedule_refresh_after_edit)
+                except Exception:
+                    pass
         else:
             frame = ttk.Frame(parent)
             frame.grid(row=0, column=0, sticky="nsew")
@@ -1617,11 +1654,93 @@ class SchedulerTkApp:
         except Exception as e:
             self.status.set("Error.")
             messagebox.showerror("Error", str(e))
+    
+    def _parse_schedule_cell(self, value):
+        s = str(value).strip()
+        if not s:
+            return "-", ""
+        s_low = s.lower()
+        if s_low in ("-", "off", "выходной"):
+            return "-", ""
+        if s_low in ("от", "отпуск", "vac", "vacation"):
+            return "от", ""
+        m = re.match(r"^(у|в|р)\s*(?:\(([^)]+)\))?$", s, flags=re.IGNORECASE)
+        if m:
+            code = m.group(1).lower()
+            cab = (m.group(2) or "").strip()
+            return code, cab
+        return "-", ""
+
+    def _rebuild_slot_assign_from_sched(self, days, sched, doctors, cabins):
+        slot_assign = {day: [] for day in days}
+        for day in days:
+            wkend = is_weekend(day)
+            shifts = ['р'] if wkend else ['у', 'в']
+            assign_map = {}
+            for doc in doctors:
+                code, cab = sched[doc.name][day]
+                if code in ('у', 'в', 'р') and cab:
+                    assign_map[(code, cab)] = doc.name
+            for sh in shifts:
+                for cab in cabins:
+                    slot_assign[day].append((sh, cab, assign_map.get((sh, cab), "свободно")))
+        return slot_assign
+
+    def _sync_schedule_view_to_result(self):
+        if not self.last_result:
+            return
+        days, norm, sched, slot_assign, deviation, meta, doctors_final, cabins = self.last_result
+
+        if getattr(self, "grid_widget", "") == "tksheet" and hasattr(self, "sheet"):
+            try:
+                data = self.sheet.get_sheet_data(return_copy=True)
+            except TypeError:
+                data = self.sheet.get_sheet_data()
+            name_to_doc = {d.name: d for d in doctors_final}
+            for r, row in enumerate(data):
+                if not row:
+                    continue
+                doc_name = str(row[0]).strip()
+                if doc_name not in name_to_doc:
+                    continue
+                for c, day in enumerate(days, start=1):
+                    if c >= len(row):
+                        continue
+                    code, cab = self._parse_schedule_cell(row[c])
+                    sched[doc_name][day] = (code, cab)
+
+        # Rebuild slot assignments / deviations from edited schedule
+        slot_assign = self._rebuild_slot_assign_from_sched(days, sched, doctors_final, cabins)
+        deviation = {}
+        for doc in doctors_final:
+            fact = sum(1 for d in days if sched[doc.name][d][0] in ('у', 'в', 'р'))
+            deviation[doc.name] = fact - norm[doc.name]
+
+        self.last_result = (days, norm, sched, slot_assign, deviation, meta, doctors_final, cabins)
+    def _schedule_refresh_after_edit(self, event=None):
+        try:
+            if getattr(self, "_refresh_job", None):
+                self.root.after_cancel(self._refresh_job)
+        except Exception:
+            pass
+        self._refresh_job = self.root.after(250, self.on_apply_schedule_edits)
+
+    def on_apply_schedule_edits(self):
+        if not self.last_result:
+            return
+        self._sync_schedule_view_to_result()
+        self._render_all()
+        self.status.set("Изменения расписания применены.")
+
     def on_export(self):
         if not self.last_result:
             messagebox.showwarning("No data", "Run Recompute first.")
             return
+
+        # Pull any manual edits from the schedule grid into the in-memory result before exporting.
+        self._sync_schedule_view_to_result()
         days, norm, sched, slot_assign, deviation, meta, doctors_final, cabins = self.last_result
+
         path = filedialog.asksaveasfilename(
             title="Save XLSX",
             defaultextension=".xlsx",
@@ -1633,6 +1752,9 @@ class SchedulerTkApp:
         data = export_xlsx_bytes(doctors_final, days, sched, norm, slot_assign, cabins)
         with open(path, "wb") as f:
             f.write(data)
+
+        # Refresh output tabs so summaries/load/stats match edited schedule too.
+        self._render_all()
         messagebox.showinfo("Saved", path)
 
     def _render_all(self):
