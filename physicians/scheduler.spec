@@ -26,7 +26,7 @@ hiddenimports += h
 block_cipher = None
 
 a = Analysis(
-    ["scheduler_tk_db_ortools_enterprise_v5.py"],
+    ["scheduler_tk_db_ortools_enterprise_v6.py"],
     pathex=["."],
     binaries=binaries,
     datas=datas,
