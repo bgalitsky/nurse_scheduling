@@ -1,0 +1,6 @@
+# Папки по умолчанию. Пути хранилищ ключей, кэша и журнала меняет администратор.
+исходники: C:/Users/User/PycharmProjects/nurse_scheduling/medeid_data/input
+результаты: C:/Users/User/PycharmProjects/nurse_scheduling/medeid_data/output
+хранилище_ключей: C:\Users\User\medeid_secure\keys.sqlite
+кэш_модели: C:\Users\User\medeid_secure\llm_cache.sqlite
+журнал: C:\Users\User\medeid_journal\journal.sqlite
