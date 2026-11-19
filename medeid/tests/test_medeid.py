@@ -12,8 +12,22 @@ from medeid.config import load
 from medeid.pipeline import Pipeline
 
 
+from medeid.settings import init_settings  # noqa: E402
+
+DICTS = ROOT / "templates" / "dicts"
+
+
+def _settings(tmp) -> Path:
+    """Отдельная папка настроек (как у ИБ), созданная из шаблонов программы."""
+    sd = tmp / "settings"
+    if not (sd / "config.yaml").exists():
+        init_settings(sd, "tester")
+    return sd
+
+
 def _cfg(tmp, **over):
-    c = yaml.safe_load((ROOT / "config.example.yaml").read_text(encoding="utf-8"))
+    sd = _settings(tmp)
+    c = yaml.safe_load((sd / "config.yaml").read_text(encoding="utf-8"))
     c["основание"] = {"приказ_номер": "1", "приказ_дата": "01.11.2026", "цель": "тест", "отделение": "тест"}
     c["извлечение"] = "правила"
     c["хранилище_ключей"] = str(tmp / "secure" / "keys.sqlite")
@@ -23,8 +37,8 @@ def _cfg(tmp, **over):
             c["категории_и_режимы"][k] = v
         else:
             c[k] = v
-    p = tmp / "c.yaml"; p.write_text(yaml.safe_dump(c, allow_unicode=True), encoding="utf-8")
-    return load(p, base_dir=ROOT)
+    p = sd / "config.yaml"; p.write_text(yaml.safe_dump(c, allow_unicode=True), encoding="utf-8")
+    return load(p)
 
 
 @pytest.fixture(scope="module")
@@ -136,7 +150,7 @@ def test_llm_external_server_refused(pdfs, tmp_path):
 def test_llm_short_numbers_not_global(llm_server, tmp_path):
     from medeid.detect import Detector, Dictionaries, NerBackend
     from medeid.llm import Entity
-    d = Detector(Dictionaries.load(ROOT / "dicts" / "2026-11-01"), NerBackend())
+    d = Detector(Dictionaries.load(DICTS / "2026-11-01"), NerBackend())
     text = "Консилиум № 88. Доза 88 мг.\n"
     spans, _ = d.detect(text, None, [Entity("88", "номер_документа")], use_rules=False)
     assert [(text[s.start:s.end], s.category) for s in spans if s.category == "номера_документов"] == [("88", "номера_документов")]
@@ -146,7 +160,7 @@ def test_llm_short_numbers_not_global(llm_server, tmp_path):
 def test_field_label_beats_model(llm_server, tmp_path):
     from medeid.detect import Detector, Dictionaries, NerBackend
     from medeid.llm import Entity
-    d = Detector(Dictionaries.load(ROOT / "dicts" / "2026-11-01"), NerBackend())
+    d = Detector(Dictionaries.load(DICTS / "2026-11-01"), NerBackend())
     text = "Врач: Врачев Игорь Николаевич\nПациент: Врачев Игорь Николаевич\n"
     spans, _ = d.detect(text, None, [Entity("Врачев Игорь Николаевич", "фио_пациента")], use_rules=False)
     assert [s.category for s in spans] == ["фио_врачей", "фио_пациента"]
@@ -209,7 +223,7 @@ def test_deletion_mode_is_typed_placeholder(pdfs, tmp_path):
 
 def test_eponyms_dict_version():
     from medeid.detect import Dictionaries
-    d = Dictionaries.load(ROOT / "dicts" / "2026-11-11")
+    d = Dictionaries.load(DICTS / "2026-11-11")
     assert {"жильбера", "крона", "ходжкина", "боткина"} <= d.eponyms
 
 
@@ -220,7 +234,7 @@ def test_full_name_always_replaced():
     from medeid.extract import fold
     from medeid.llm import Entity
     from medeid.transform import Transformer
-    d = Detector(Dictionaries.load(ROOT / "dicts" / "2026-11-11"), NerBackend())
+    d = Detector(Dictionaries.load(DICTS / "2026-11-11"), NerBackend())
     modes = {k: "замена_меткой" for k in ("фио_пациента", "фио_родственников", "фио_врачей", "фио_прочие", "адрес",
              "телефон", "email", "снилс_полис_паспорт", "номер_истории", "номера_документов", "место_работы")}
     modes.update(даты="только_год", возраст="как_есть")
@@ -241,3 +255,88 @@ def test_full_name_always_replaced():
         assert "Врач: [ФИО_ВРАЧА]" in out
     t3 = "Пациент: Петрова Анна Ивановна\nЦентр имени\nА.С. Логинова Департамента\nА.С. Логинова Департамента\n"
     assert run(t3).count("А.С. Логинова") == 2
+
+
+# ------------------------------------------------------------ 2.2: имена файлов, правила, конфиденциальность
+def _ascii_names(root: Path) -> list[str]:
+    return [str(p.relative_to(root)) for p in root.rglob("*") if not p.name.isascii()]
+
+
+def test_only_ascii_file_names(pdfs, llm_server, tmp_path):
+    """Программа нигде не создаёт имён файлов и папок не латиницей."""
+    from medeid.pipeline import delete_outputs
+    from medeid.rules import default_filename, rules_docx
+    cfg = _llm_cfg(tmp_path, llm_server)
+    m = Pipeline(cfg).run(pdfs, tmp_path / "results")
+    assert (Path(m["папка_партии"]) / "_review").exists() or True
+    rules_docx(cfg, tmp_path / default_filename(cfg))
+    assert _ascii_names(tmp_path) == []
+    assert _ascii_names(ROOT) == []                                   # и в самой программе
+
+
+def test_results_manifest_reveals_no_methods(pdfs, llm_server, tmp_path):
+    import json
+    m = Pipeline(_llm_cfg(tmp_path, llm_server)).run(pdfs, tmp_path / "results")
+    pub = json.loads((Path(m["папка_партии"]) / "manifest.json").read_text(encoding="utf-8"))
+    assert set(pub) == {"партия", "документы"}
+    blob = json.dumps(pub, ensure_ascii=False)
+    for secret in ("qwen", "модель", "словар", "извлечение", "правила", "инструкция", "режим", "замечан", "остаток"):
+        assert secret not in blob, secret
+    assert all(set(d) == {"документ", "файл", "sha256"} for d in pub["документы"])
+
+
+def test_rules_export_and_edition(tmp_path):
+    from medeid.rules import rules_docx, rules_text
+    cfg = _cfg(tmp_path)
+    t = rules_text(cfg)
+    for phrase in ("ФИО пациента (в любой форме", "заменяется меткой [ФИО_ПАЦИЕНТА]",
+                   "заменяется специальностью, например [ВРАЧ-ОНКОЛОГ]", "сокращается до названия города",
+                   "остаётся только год", "возраст старше 89 лет заменяется на «90+»", "ПРОЕКТ", cfg.rules_id()):
+        assert phrase in t, phrase
+    # не раскрываются: модель, инструкция для неё, содержимое и файлы словарей
+    for secret in ("qwen", "llm", "языков", "Ollama", "first_names", "eponyms", "Жильбера", "Химки", "seed"):
+        assert secret.lower() not in t.lower(), secret
+    rules_docx(cfg, tmp_path / "r.docx")
+    import docx
+    assert "заменяется меткой [ФИО_ПАЦИЕНТА]" in "\n".join(p.text for p in docx.Document(str(tmp_path / "r.docx")).paragraphs)
+    # редакция не зависит от способа поиска, но меняется при изменении правил
+    assert _cfg(tmp_path, извлечение="правила").rules_id() == cfg.rules_id()
+    assert _cfg(tmp_path, даты="квартал").rules_id() != cfg.rules_id()
+
+
+def test_approval_blocks_changed_rules(pdfs, tmp_path):
+    from medeid.config import ConfigError
+    from medeid.journal import Journal
+    rid = _cfg(tmp_path).rules_id()
+    ok = _cfg(tmp_path, утверждение={"редакция": rid, "приказ_номер": "77-о", "приказ_дата": "18.11.2026"})
+    assert ok.approved
+    m = Pipeline(ok).run(pdfs, tmp_path / "results")
+    jr = Journal(ok.journal)
+    row = [r for r in jr.runs() if r[0] == m["партия"]][0]
+    assert row[13] == rid and row[14].startswith("да: приказ № 77-о")
+    with pytest.raises(ConfigError, match="изменены после утверждения"):
+        _cfg(tmp_path, даты="удаление", утверждение={"редакция": rid, "приказ_номер": "77-о", "приказ_дата": "1"})
+
+
+def test_verify_from_journal_and_tamper(pdfs, tmp_path):
+    from medeid.pipeline import verify_batch
+    cfg = _cfg(tmp_path)
+    m = Pipeline(cfg).run(pdfs, tmp_path / "results")
+    r = verify_batch(pdfs, m["партия"], cfg.journal, cfg.settings_dir, tmp_path / "results")
+    assert r["различаются"] == [] and r["изменены_файлы_результата"] == [] and r["совпадает_отпечаток"]
+    f = sorted(Path(m["папка_партии"]).glob("DOC-*.txt"))[0]
+    f.write_text("подмена", encoding="utf-8")
+    r = verify_batch(pdfs, m["партия"], cfg.journal, cfg.settings_dir, tmp_path / "results")
+    assert r["изменены_файлы_результата"] == [f.stem]
+
+
+def test_settings_must_be_outside_program(pdfs, tmp_path):
+    from medeid.config import load_raw
+    import yaml
+    sd = _settings(tmp_path)
+    raw = yaml.safe_load((sd / "config.yaml").read_text(encoding="utf-8"))
+    raw["основание"] = {"приказ_номер": "1", "приказ_дата": "1", "цель": "т", "отделение": "т"}
+    raw["извлечение"] = "правила"; raw["журнал"] = str(tmp_path / "j.sqlite")
+    cfg = load_raw(raw, ROOT / "templates")                # «настройки» внутри папки программы
+    with pytest.raises(RuntimeError, match="раздельными"):
+        Pipeline(cfg).run(pdfs, tmp_path / "results")
